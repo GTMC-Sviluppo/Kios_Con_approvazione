@@ -1,19 +1,19 @@
 # ========================================
 # KIOSK HR - Creazione Pacchetto Deploy
-# Versione: 2.4.1
-# Data: 2026-10-16
+# Versione: 2.4.2
+# Data: 2026-10-27
 # ========================================
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  KIOSK HR - Creazione Pacchetto" -ForegroundColor Cyan
-Write-Host "  Versione 2.4.1" -ForegroundColor Cyan
+Write-Host "  Versione 2.4.2" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Imposta nome pacchetto con timestamp
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$packageName = "Kiosk_HR_v2.4.1_$timestamp.zip"
+$packageName = "Kiosk_HR_v2.4.2_$timestamp.zip"
 
 Write-Host "[1/7] Preparazione directory temporanea..." -ForegroundColor Yellow
 if (Test-Path "deploy_temp") {
@@ -123,15 +123,13 @@ Write-Host "[5/7] Copia script e documentazione..." -ForegroundColor Yellow
 $scriptFiles = @(
     "INSTALLA.bat",
     "START_APP.bat",
-    "START_SISTEMA_KIOSK.bat",
     "START_KIOSK_REPORTS_SERVICE.bat",
     "AGGIORNA_FIRMA.bat",
     "MOSTRA_IP_KIOSK.bat",
-    "START_KIOSK.bat",
+    "STATO_KIOSK.bat",
     "INSTALLA_AUTOSTART.bat",
     "RIMUOVI_AUTOSTART.bat",
-    "AVVIO_KIOSK.vbs",
-    "AVVIA_TUTTO.BAT"
+    "AVVIO_KIOSK.vbs"
 )
 
 $docFiles = @(
@@ -146,7 +144,7 @@ $docFiles = @(
     "GUIDA_NEWS_SLIDESHOW.md",
     "CONFIGURAZIONE_RETE.md",
     "STAMPA_AUTOMATICA.md",
-    "GUIDA_RIAVVIO_AUTOMATICO_KIOSK.md",
+    "PROCEDURA_AVVIO_AUTOMATICO.md",
     "IMPLEMENTAZIONE_ASSENZE_URGENTI_SPECIALI.md"
 )
 
@@ -233,7 +231,8 @@ try {
         Write-Host "  2. Estrarre il contenuto" -ForegroundColor White
         Write-Host "  3. Eseguire INSTALLA.bat come Amministratore" -ForegroundColor White
         Write-Host "  4. Configurare database e email: python setup.py" -ForegroundColor White
-        Write-Host "  5. Avviare: START_APP.bat o START_SISTEMA_KIOSK.bat" -ForegroundColor White
+        Write-Host "  5. Avvio manuale: START_APP.bat - Autostart: INSTALLA_AUTOSTART.bat" -ForegroundColor White
+        Write-Host "     (procedura completa: PROCEDURA_AVVIO_AUTOMATICO.md)" -ForegroundColor White
         Write-Host ""
         Write-Host "========================================" -ForegroundColor Green
         

@@ -127,10 +127,18 @@ REM Nota: Chr(34) = virgoletta; evita qualunque ambiguita' di quoting VBS/batch.
     echo Set sh  = CreateObject^("WScript.Shell"^)
     echo If Not fso.FileExists^("%SUPERVISOR%"^) Then WScript.Quit 1
     echo py = "%KIOSK_DIR%\venv\Scripts\pythonw.exe"
-    echo If Not fso.FileExists^(py^) Then py = "pythonw.exe"
-    echo sh.CurrentDirectory = "%KIOSK_DIR%"
-    echo cmd = Chr^(34^) ^& py ^& Chr^(34^) ^& " " ^& Chr^(34^) ^& "%SUPERVISOR%" ^& Chr^(34^)
-    echo sh.Run cmd, 0, False
+    echo If fso.FileExists^(py^) Then
+    echo     sh.CurrentDirectory = "%KIOSK_DIR%"
+    echo     cmd = Chr^(34^) ^& py ^& Chr^(34^) ^& " " ^& Chr^(34^) ^& "%SUPERVISOR%" ^& Chr^(34^)
+    echo     sh.Run cmd, 0, False
+    echo Else
+    echo     On Error Resume Next
+    echo     If Not fso.FolderExists^("%KIOSK_DIR%logs"^) Then fso.CreateFolder^("%KIOSK_DIR%logs"^)
+    echo     Set ts = fso.OpenTextFile^("%KIOSK_DIR%logs\autostart_error.log", 8, True^)
+    echo     ts.WriteLine Now ^& " - Startup: venv\Scripts\pythonw.exe non trovato, avvio annullato"
+    echo     ts.Close
+    echo     On Error Goto 0
+    echo End If
 )
 
 if not exist "%STARTUP_VBS%" (

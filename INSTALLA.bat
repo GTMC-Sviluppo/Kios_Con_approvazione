@@ -63,23 +63,40 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-echo [1/8] Verifica Python 3.11...
+echo [1/8] Verifica Python - 3.11 riferimento, 3.12/3.13 supportati...
+set "PY_CMD="
 py -3.11 --version >nul 2>&1
-if %errorLevel% neq 0 (
-    echo [ERRORE] Python 3.11 non trovato tramite il py launcher!
-    echo.
-    echo Installare Python 3.11 da:
-    echo   https://www.python.org/downloads/release/python-3119/
-    echo.
-    echo IMPORTANTE durante l'installazione:
-    echo   - selezionare "Add Python to PATH"
-    echo   - lasciare selezionato "py launcher"
-    echo.
-    echo Verifica con: py -3.11 --version
-    pause
-    exit /b 1
+if %errorLevel% equ 0 (
+    set "PY_CMD=py -3.11"
+    echo [OK] Python 3.11 trovato - versione di riferimento
+    goto :py_pronto
 )
-echo [OK] Python 3.11 trovato
+py -3.12 --version >nul 2>&1
+if %errorLevel% equ 0 (
+    set "PY_CMD=py -3.12"
+    echo [AVVISO] Trovato Python 3.12 - supportato, versione di riferimento e' la 3.11
+    goto :py_pronto
+)
+py -3.13 --version >nul 2>&1
+if %errorLevel% equ 0 (
+    set "PY_CMD=py -3.13"
+    echo [AVVISO] Trovato Python 3.13 - supportato, versione di riferimento e' la 3.11
+    goto :py_pronto
+)
+echo [ERRORE] Nessun Python 3.11, 3.12 o 3.13 trovato tramite il py launcher!
+echo.
+echo Installare Python 3.11 da:
+echo   https://www.python.org/downloads/release/python-3119/
+echo.
+echo IMPORTANTE durante l'installazione:
+echo   - selezionare "Add Python to PATH"
+echo   - lasciare selezionato "py launcher"
+echo.
+echo Verifica con: py -3.11 --version
+pause
+exit /b 1
+
+:py_pronto
 
 echo.
 echo [2/8] Creazione ambiente virtuale...
@@ -87,13 +104,13 @@ if exist venv (
     echo [INFO] Ambiente virtuale esistente trovato, lo rimuovo...
     rmdir /s /q venv
 )
-py -3.11 -m venv venv
+%PY_CMD% -m venv venv
 if %errorLevel% neq 0 (
     echo [ERRORE] Impossibile creare ambiente virtuale
     pause
     exit /b 1
 )
-echo [OK] Ambiente virtuale creato (Python 3.11)
+echo [OK] Ambiente virtuale creato
 
 echo.
 echo [3/8] Attivazione ambiente virtuale...
@@ -215,10 +232,13 @@ echo.
 echo 2. Avviare l'applicazione:
 echo    Eseguire: START_APP.bat
 echo.
-echo 3. Per modalità Kiosk fullscreen:
-echo    Eseguire: START_SISTEMA_KIOSK.bat
+echo 3. Per l'avvio automatico dopo lo shutdown (modalita' kiosk):
+echo    Eseguire: INSTALLA_AUTOSTART.bat
+echo    Procedura completa: PROCEDURA_AVVIO_AUTOMATICO.md
 echo.
-echo 4. Consultare README.md per maggiori informazioni
+echo 4. Diagnostica stato kiosk: STATO_KIOSK.bat
+echo.
+echo 5. Consultare README.md per maggiori informazioni
 echo.
 echo ========================================
 echo.

@@ -88,6 +88,9 @@ EDGE_ARGS = [
 ]
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Su un deploy pulito la cartella logs/ può non esistere ancora: il RotatingFileHandler
+# senza directory solleva e, sotto pythonw, l'errore resta invisibile.
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [SUPERVISOR] %(levelname)s %(message)s',
@@ -178,6 +181,15 @@ def launch_server():
 
 def launch_browser(browser):
     """Apre il browser in modalità kiosk (non blocca: processo indipendente)."""
+    if browser is None:
+        # Nessun Chrome/Edge installato: senza questo ramo l'unpack qui sotto
+        # solleverebbe TypeError e abbatterebbe l'intero supervisore.
+        logger.warning('Nessun Chrome/Edge trovato: apro con il browser di default')
+        try:
+            os.startfile(f'http://localhost:{SERVER_PORT}')
+        except Exception as e:
+            logger.error(f'Anche il browser di default è fallito: {e}')
+        return
     path, args, name = browser
     try:
         subprocess.Popen([str(path)] + args, cwd=str(BASE_DIR))
@@ -289,7 +301,16 @@ def main():
         sys.exit(1)
 
     try:
-        run()
+        while True:
+            try:
+                run()
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                # Un'eccezione non gestita non deve lasciare il kiosk nero fino
+                # al prossimo logon: log, pausa e ripresa del ciclo di sorveglianza.
+                logger.exception('Eccezione non gestita nel supervisore: ripresa tra 30s')
+                time.sleep(30)
     except KeyboardInterrupt:
         logger.info('Interruzione da tastiera: arresto supervisore')
     finally:

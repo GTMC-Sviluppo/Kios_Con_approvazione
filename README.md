@@ -66,6 +66,7 @@ kiosk-hr-adeverente/
 ├── email_connector.py          # Invio email notifiche
 ├── db_connection.py            # Connessione database
 ├── config_manager.py           # Gestione configurazioni
+├── kiosk_supervisor.py         # Supervisore kiosk (riavvio automatico server+browser)
 ├── utils.py                    # Utility varie
 ├── setup.py                    # Script configurazione iniziale
 ├── requirements.txt            # Dipendenze Python
@@ -79,11 +80,15 @@ kiosk-hr-adeverente/
 │   ├── css/
 │   ├── js/
 │   └── images/
+├── sql/                        # Migrazioni SQL
 ├── temp/                       # PDF temporanei
 ├── Images/                     # Immagini firme
 ├── INSTALLA.bat               # Script installazione
-├── START_APP.bat              # Avvio applicazione
-└── START_SISTEMA_KIOSK.bat    # Avvio modalità kiosk
+├── START_APP.bat              # Avvio manuale applicazione
+├── INSTALLA_AUTOSTART.bat     # Avvio automatico dopo shutdown (senza admin)
+├── RIMUOVI_AUTOSTART.bat      # Disattivazione avvio automatico
+├── STATO_KIOSK.bat            # Pannello diagnostico kiosk
+└── AVVIO_KIOSK.vbs            # Launcher nascosto al logon
 
 ```
 
@@ -112,6 +117,7 @@ Eseguire `python setup.py` per configurare:
 
 ## 📖 Guide Dettagliate
 
+- **[PROCEDURA_AVVIO_AUTOMATICO.md](PROCEDURA_AVVIO_AUTOMATICO.md)** - Avvio automatico dopo shutdown (BIOS, autologon, checklist)
 - **[INSTALLAZIONE_MANUALE.md](INSTALLAZIONE_MANUALE.md)** - Installazione passo-passo
 - **[DEPLOYMENT.md](DEPLOYMENT.md)** - Deployment in produzione
 - **[GUIDA_RAPIDA.md](GUIDA_RAPIDA.md)** - Guida utente rapida
@@ -152,6 +158,9 @@ Eseguire `python setup.py` per configurare:
 ## 🔐 Sicurezza
 
 - **Crittografia**: Tutte le credenziali sono crittografate con Fernet
+- **Chiavi fuori dal repository**: `*.key`, `*.enc`, `*.pfx` NON sono tracciati in git; si distribuiscono solo col pacchetto deploy generato da `CREA_PACCHETTO.ps1`
+- **Server di produzione**: in produzione `app.py` usa waitress (WSGI) al posto del server di sviluppo Flask
+- **Hardening v2.4.2**: protezione path traversal su `/api/print-pdf`, header di sicurezza, rate-limit sul login manager, scadenza token manager, messaggi d'errore generici verso il client
 - **Firma Digitale**: I certificati possono essere firmati digitalmente
 - **Logging**: Tutte le operazioni sono registrate nel database
 - **Validazione**: Controlli di validità su badge, date, disponibilità ferie

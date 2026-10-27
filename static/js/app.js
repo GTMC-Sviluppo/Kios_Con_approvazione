@@ -715,10 +715,18 @@ function showToast(message, type = 'success') {
         warning: '⚠️'
     };
 
-    toast.innerHTML = `
-        <span class="toast-icon">${icons[type] || 'ℹ️'}</span>
-        <span class="toast-message">${message}</span>
-    `;
+    // textContent al posto di innerHTML: nomi e messaggi arrivano dal DB
+    // e non devono poter iniettare markup (stored XSS)
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'toast-icon';
+    iconSpan.textContent = icons[type] || 'ℹ️';
+
+    const messageSpan = document.createElement('span');
+    messageSpan.className = 'toast-message';
+    messageSpan.textContent = message;
+
+    toast.appendChild(iconSpan);
+    toast.appendChild(messageSpan);
 
     elements.toastContainer.appendChild(toast);
 

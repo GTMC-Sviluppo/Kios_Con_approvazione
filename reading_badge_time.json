@@ -1,8 +1,0 @@
-{
-    "badge_reading": {
-        "rfid_delay_ms": 800,
-        "manual_typing_delay_ms": 3000,
-        "manual_typing_threshold_ms": 150,
-        "comment": "rfid_delay_ms: attesa dopo burst RFID. manual_typing_delay_ms: attesa dopo digitazione manuale. manual_typing_threshold_ms: soglia ms tra caratteri per distinguere RFID da manuale."
-    }
-}

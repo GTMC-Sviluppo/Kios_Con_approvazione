@@ -41,6 +41,16 @@
         return result;
     }
 
+    function escapeHtml(value) {
+        // Escape dei dati dal server prima dell'interpolazione in innerHTML (stored XSS)
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function setLoading(isLoading) {
         loadingOverlay.style.display = isLoading ? 'flex' : 'none';
     }
@@ -103,22 +113,22 @@
         items.forEach((item) => {
             const tr = document.createElement('tr');
             const canTakeAction = item.can_take_action;
-            const statusClass = item.status || 'pending';
+            const statusClass = String(item.status || 'pending').replace(/[^a-z0-9_-]/gi, '');
 
             tr.innerHTML = `
-                <td>${item.absence_request_id}</td>
-                <td>${item.request_number || '-'}</td>
-                <td>${item.employee || '-'}</td>
-                <td>${item.request_type || '-'}</td>
+                <td>${escapeHtml(item.absence_request_id)}</td>
+                <td>${escapeHtml(item.request_number || '-')}</td>
+                <td>${escapeHtml(item.employee || '-')}</td>
+                <td>${escapeHtml(item.request_type || '-')}</td>
                 <td>${formatDate(item.date_start)} - ${formatDate(item.date_end)}</td>
                 <td>${formatTimeRange(item.from_time, item.to_time)}</td>
                 <td>${formatDateTime(item.date_sys)}</td>
                 <td>
-                    <div class="status-pill status-${statusClass}">${item.status_text || 'În așteptare'}</div>
+                    <div class="status-pill status-${statusClass}">${escapeHtml(item.status_text || 'În așteptare')}</div>
                 </td>
                 <td>
                     ${canTakeAction ? `
-                        <div class="decision-controls" data-request-id="${item.absence_request_id}">
+                        <div class="decision-controls" data-request-id="${escapeHtml(item.absence_request_id)}">
                             <label class="decision-option">
                                 <input type="checkbox" class="decision-checkbox decision-accept" data-role="accept">
                                 <span>Accetta</span>

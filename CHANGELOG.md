@@ -2,6 +2,80 @@
 
 Tutte le modifiche rilevanti al progetto saranno documentate in questo file.
 
+## [2.4.2] - 2026-10-27
+
+### 🔒 Sicurezza, pulizia repository e procedura di avvio automatico
+
+#### Sicurezza (app)
+
+- **`/api/print-pdf`**: chiusa la **path traversal** (`<path:filename>` permetteva
+  di leggere qualunque file, es. chiavi/`.enc`): ora solo basename, solo `.pdf`,
+  solo dentro `temp/` (stessa protezione già presente su `/api/delete-pdf`).
+- **Chiavi e credenziali fuori dal repository**: rimosse dal tracking git
+  `encryption_key.key`, `email_key.key`, `db_config.enc`, `email_credentials.enc`,
+  `certificate_old.pfx`; `.gitignore` ora blocca `*.key`, `*.enc`, `*.pfx`,
+  `logs/`, zip di release, `build/`, `dist/`. ⚠️ La history git conserva i file
+  storici: **ruotare la password del DB SQL Server e le credenziali SMTP**.
+- **SECRET_KEY**: non più placeholder committato — chiave random generata al
+  primo avvio e salvata in `secret_key.key` (gitignored).
+- **Server di produzione**: `app.py` usa **waitress** (WSGI) se installata
+  (aggiunta a `requirements.txt`), con fallback sul server di sviluppo Flask.
+- **Rate limiting** sul login manager (5 tentativi falliti per IP / 15 min).
+- **Token manager con scadenza**: TTL 60 min sliding con pulizia periodica.
+- **XSS stored rimosso**: `showToast` in `app.js` usa `textContent`;
+  `approval.js` escapa i campi dal DB (`escapeHtml`) e sanifica la classe CSS
+  dello stato.
+- **Errori generici verso il client**: le 24 risposte `500` non espongono più
+  `str(e)` (dettagli solo nei log).
+- **`/api/add-reason`** richiede ora autenticazione manager (non era usato dal
+  frontend); validazione lunghezza motivo.
+- **Header di sicurezza**: `X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy` su ogni risposta.
+
+#### Pulizia repository
+
+- Rimossi **7 script legacy**: `AVVIA_TUTTO.BAT`, `INSTALLA_KIOSK.bat`,
+  `START_KIOSK.bat`, `START_KIOSK_EDGE.bat`, `START_KIOSK_FULLSCREEN.bat`,
+  `START_SISTEMA_KIOSK.bat`, `Lancia_come_adm.vbs` (percorso rotto
+  `C:\Users\gtesta\...`). Riferimenti aggiornati in `CREA_PACCHETTO.ps1`,
+  `INSTALLA.bat` e README.
+- Fuori dal repo anche zip di release storici, PDF/artefatti di test, log e
+  file runtime (`reading_badge_time.json`, `logs/offline_events.json`).
+
+#### Avvio automatico dopo shutdown (procedura v2)
+
+- **`kiosk_supervisor.py`**: corretto il crash che abbatteva l'intero
+  supervisore quando Chrome/Edge non risultano installati (`launch_browser(None)`);
+  creazione di `logs/` all'avvio; qualunque eccezione imprevista viene loggata
+  e il ciclo riprende invece di terminare.
+- **`AVVIO_KIOSK.vbs`** (e VBS generato dall'installer): niente più fallback
+  silenzioso a un `pythonw` globale senza Flask — scrive la causa in
+  `logs/autostart_error.log` ed esce.
+- **`STATO_KIOSK.bat`** (riscritto): pannello diagnostico del flusso v2.4.x
+  (chiave Run, file Startup, autologon, supervisore, health su porta 3000,
+  finestra browser, log) — la versione precedente controllava il sistema
+  deprecato (task `KioskHR_Watchdog`, porta 5000, `wmic`).
+- **`PROCEDURA_AVVIO_AUTOMATICO.md`** (nuova, sostituisce
+  `GUIDA_RIAVVIO_AUTOMATICO_KIOSK.md`): prerequisiti BIOS (Restore AC Power
+  Loss), autologon con caveat Windows Hello/BitLocker, catena di ripartenza,
+  checklist di verifica (incluso `STATO_KIOSK.bat`) e matrice di risoluzione
+  problemi.
+
+#### Connessione database e accesso in rete
+
+- **`db_connection.py`**: connessione resiliente all'istanza nominata
+  `roghipsql01.vandewiele.local\emsreset`. Se SQL Browser (UDP 1434) non
+  risponde, ritenta su `host,1434`; se il nome DNS non e' risolvibile, ritenta
+  su `10.140.1.4,1434`. Porta e IP sovrascrivibili con `port`/`server_ip` in
+  config o con le variabili d'ambiente `DB_PORT`/`DB_SERVER_IP`.
+- Rimosso l'attributo non valido `Connection Timeout` dalla connection string
+  (avviso "Invalid connection string attribute"); il timeout resta su
+  `pyodbc.connect(timeout=8)`.
+- **`MOSTRA_IP_KIOSK.bat`**: mostra il nome PC e l'URL `http://NOMEPC:3000`
+  (stabile anche con IP DHCP), con promemoria per rinominare il PC in `KIOSK-VW`.
+
+---
+
 ## [2.4.1] - 2026-10-16
 
 ### 🔄 Ripartenza automatica del kiosk dopo spegnimento — SENZA admin

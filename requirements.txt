@@ -6,8 +6,13 @@
 Flask==3.0.0
 Werkzeug==3.0.1
 
+# Server WSGI di produzione (app.py lo usa al posto del server di sviluppo Flask)
+waitress==3.0.0
+
 # Database
-pyodbc==5.0.1
+# 5.0.1 = profilo testato su Python 3.11; da 3.12 in poi servono i wheel di 5.2.0
+pyodbc==5.0.1; python_version < "3.12"
+pyodbc==5.2.0; python_version >= "3.12"
 
 # PDF Generation e Manipolazione
 reportlab==4.0.7
@@ -24,7 +29,9 @@ python-dateutil==2.8.2
 pytz==2023.3
 
 # Windows Printing
-pywin32==306
+# 306 = profilo testato su Python 3.11; da 3.12 in poi servono i wheel di 308
+pywin32==306; python_version < "3.12"
+pywin32==308; python_version >= "3.12"
 
 # Scheduling (per printer keepalive)
 schedule==1.2.0
@@ -36,8 +43,10 @@ loguru==0.7.2
 keyring==24.3.0
 
 # Immagini (per eventuali manipolazioni future)
-# Versione 10.4.0 garantisce wheel precompilati per Python 3.11 su Windows
-Pillow==10.4.0
+# 10.4.0 = profilo testato su Python 3.11; su 3.13 servono i wheel di Pillow 11
+# (il progetto usa solo API stabili di PIL.Image, compatibili con la 11.x)
+Pillow==10.4.0; python_version < "3.13"
+Pillow==11.0.0; python_version >= "3.13"
 
 # Firma digitale PDF con certificati
 pyHanko==0.21.0

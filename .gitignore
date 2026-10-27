@@ -10,13 +10,28 @@ ENV/
 
 # Logs
 *.log
-app_debug.log
+logs/
 
-# Database credentials (encrypted files are OK to commit)
-# db_config.enc
-# encryption_key.key
-# email_credentials.enc
-# email_key.key
+# Credenziali e chiavi: MAI nel repo. Si distribuiscono solo tramite il
+# pacchetto deploy generato da CREA_PACCHETTO.ps1 sulla macchina di sviluppo.
+*.key
+*.enc
+*.pfx
+
+# Stato runtime locale
+reading_badge_time.json
+
+# Pacchetti di release (generati da CREA_PACCHETTO.ps1)
+/Kiosk_HR_v*.zip
+/Kios_*.zip
+
+# Artefatti di build
+build/
+dist/
+
+# Residui locali di test (fuori dal repo)
+/test_*.pdf
+/query
 
 # Temporary files
 temp/
@@ -50,6 +65,7 @@ generated-image.png
 *.sql
 *.txt
 !requirements.txt
+!requirements_service.txt
 *.ini
 
 # Le migrazioni SQL del progetto sono parte del codice

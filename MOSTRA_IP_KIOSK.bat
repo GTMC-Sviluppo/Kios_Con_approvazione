@@ -19,7 +19,8 @@ for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4"') do (
 REM Rimuovi spazi
 set IP=%IP: =%
 
-echo IP Kiosk: %IP%
+echo Nome PC:  %COMPUTERNAME%
+echo IP Kiosk: %IP%  (puo' cambiare, DHCP)
 echo.
 echo ========================================
 echo   URL ACCESSO
@@ -28,8 +29,16 @@ echo.
 echo Locale (sul kiosk):
 echo   http://localhost:3000
 echo.
-echo Da altri PC sulla rete:
+echo Da altri PC sulla rete (consigliato, non cambia):
+echo   http://%COMPUTERNAME%:3000
+echo.
+echo Da altri PC sulla rete (tramite IP attuale):
 echo   http://%IP%:3000
+if /i not "%COMPUTERNAME%"=="KIOSK-VW" (
+    echo.
+    echo NOTA: il PC non si chiama KIOSK-VW. Per rinominarlo, da PowerShell
+    echo       come Amministratore:  Rename-Computer -NewName "KIOSK-VW" -Restart
+)
 echo.
 echo ========================================
 echo   FIREWALL
@@ -66,7 +75,7 @@ echo   TEST CONNESSIONE
 echo ========================================
 echo.
 echo 1. Apri browser su altro PC
-echo 2. Vai a: http://%IP%:3000
+echo 2. Vai a: http://%COMPUTERNAME%:3000  (oppure http://%IP%:3000)
 echo 3. Dovresti vedere la pagina launcher
 echo.
 

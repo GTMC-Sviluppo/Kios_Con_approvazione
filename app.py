@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import logging
 import os
 import sys
+import time
 import uuid
 
 # Forza encoding UTF-8 su Windows per gestire caratteri rumeni/Unicode nei log e JSON
@@ -48,7 +49,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here-change-in-production'
+
+# Secret per-installazione: generato al primo avvio e salvato fuori dal repo git
+_SECRET_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'secret_key.key')
+try:
+    with open(_SECRET_FILE, 'rb') as _f:
+        app.config['SECRET_KEY'] = _f.read().strip()
+except FileNotFoundError:
+    _generated_secret = os.urandom(32)
+    with open(_SECRET_FILE, 'wb') as _f:
+        _f.write(_generated_secret)
+    app.config['SECRET_KEY'] = _generated_secret
+    logger.info("Generata nuova SECRET_KEY per-installazione in secret_key.key")
 
 # Inizializza connessione database
 config_manager = ConfigManager()
@@ -59,6 +71,22 @@ kiosk_logger = KioskRequestLogger(db_connection)
 
 # Token manager approvazioni: solo memoria del server, non persistente lato browser
 manager_auth_tokens = {}
+MANAGER_TOKEN_TTL_SECONDS = 3600  # sessione manager valida 60 min dall'ultima attività
+
+
+@app.after_request
+def set_security_headers(response):
+    """Header di sicurezza minimi per il kiosk."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    return response
+
+
+# Rate limiting login manager: max tentativi falliti per IP nella finestra indicata
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_WINDOW_SECONDS = 900  # 15 minuti
+_login_failures = {}
 
 
 
@@ -143,11 +171,11 @@ def get_badge_config():
         })
     except Exception as e:
         logger.error(f"Errore get_badge_config: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 def _get_manager_auth_from_request():
-    """Recupera il token manager dalla request e lo valida."""
+    """Recupera il token manager dalla request e lo valida (scadenza sliding)."""
     auth_header = request.headers.get('Authorization', '')
     token = ''
 
@@ -163,7 +191,25 @@ def _get_manager_auth_from_request():
     if not auth_data:
         return None, None
 
+    now = time.time()
+    if now - auth_data.get('last_seen', 0) > MANAGER_TOKEN_TTL_SECONDS:
+        manager_auth_tokens.pop(token, None)
+        return None, None
+
+    auth_data['last_seen'] = now
+    _purge_expired_manager_tokens(now)
+
     return token, auth_data
+
+
+def _purge_expired_manager_tokens(now=None):
+    """Rimuove i token manager scaduti dalla memoria."""
+    if now is None:
+        now = time.time()
+    expired = [t for t, d in manager_auth_tokens.items()
+               if now - d.get('last_seen', 0) > MANAGER_TOKEN_TTL_SECONDS]
+    for expired_token in expired:
+        manager_auth_tokens.pop(expired_token, None)
 
 
 @app.route('/favicon.ico')
@@ -261,7 +307,7 @@ def get_news():
         logger.error(f"Errore recupero news: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
     finally:
         # Chiudi connessione per liberare risorse
         if conn:
@@ -310,7 +356,7 @@ def get_slideshow_images():
         
     except Exception as e:
         logger.error(f"Errore recupero immagini slideshow: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/images/<path:filename>')
@@ -361,7 +407,7 @@ def validate_badge():
     
     except Exception as e:
         logger.error(f"Errore nella validazione badge: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/employees', methods=['GET'])
@@ -410,7 +456,7 @@ def get_employees():
     
     except Exception as e:
         logger.error(f"Errore nel recupero dipendenti: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/certificate-reasons', methods=['GET'])
@@ -444,15 +490,21 @@ def get_certificate_reasons():
     
     except Exception as e:
         logger.error(f"Errore nel recupero motivi: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/add-reason', methods=['POST'])
 def add_reason():
-    """Aggiunge nuovo motivo certificato"""
+    """Aggiunge nuovo motivo certificato (riservato ai manager autenticati)"""
     try:
+        _, manager_session = _get_manager_auth_from_request()
+        if not manager_session:
+            return jsonify({'success': False, 'error': 'Autorizzazione manager richiesta'}), 401
+
         data = request.json
-        reason = data.get('reason', '').upper()
+        reason = (data.get('reason') or '').strip().upper()
+        if not reason or len(reason) > 100:
+            return jsonify({'success': False, 'error': 'Motivo non valido'}), 400
         can_type_special = data.get('canTypeSpecial', False)
         
         conn = db_connection.connect()
@@ -471,7 +523,7 @@ def add_reason():
     
     except Exception as e:
         logger.error(f"Errore nell'aggiunta motivo: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/generate-certificate', methods=['POST'])
@@ -552,21 +604,30 @@ def generate_certificate():
         if badge_number:
             kiosk_logger.log_certificate_request(badge_number, reason or "Unknown", executed=False)
         
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/print-pdf/<path:filename>')
 def print_pdf(filename):
     """Invia PDF al browser per stampa"""
     try:
-        pdf_path = os.path.join('temp', filename)
+        # Protezione path traversal: solo basename, solo PDF, solo dentro temp/
+        safe_name = os.path.basename(filename)
+        if not safe_name or safe_name != filename or not safe_name.lower().endswith('.pdf'):
+            return jsonify({'success': False, 'error': 'Nome file non valido'}), 400
+
+        pdf_path = os.path.abspath(os.path.join('temp', safe_name))
+        temp_dir = os.path.abspath('temp')
+        if not pdf_path.startswith(temp_dir + os.sep):
+            return jsonify({'success': False, 'error': 'Path non consentito'}), 400
+
         if os.path.exists(pdf_path):
             return send_file(pdf_path, mimetype='application/pdf')
         else:
             return jsonify({'success': False, 'error': 'File non trovato'}), 404
     except Exception as e:
         logger.error(f"Errore nell'invio PDF: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/generate-absence-report', methods=['POST'])
@@ -675,7 +736,7 @@ def get_request_types():
         
     except Exception as e:
         logger.error(f"Errore recupero tipi richiesta: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/available-vacation-days', methods=['POST'])
@@ -711,7 +772,7 @@ def get_available_vacation_days():
         
     except Exception as e:
         logger.error(f"Errore calcolo giorni disponibili: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/calculate-working-days', methods=['POST'])
@@ -754,7 +815,7 @@ def calculate_working_days():
 
     except Exception as e:
         logger.error(f"Errore calcolo giorni lavorativi: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/absence-quota', methods=['POST'])
@@ -799,7 +860,7 @@ def absence_quota():
 
     except Exception as e:
         logger.error(f"Errore recupero quota assenza: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/hr/special-docs-sweep', methods=['POST'])
@@ -880,7 +941,7 @@ def special_docs_sweep():
         logger.error(f"Errore sweep assenze speciali: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/submit-absence-request', methods=['POST'])
@@ -1242,7 +1303,7 @@ def submit_absence_request():
         logger.error(f"Errore invio richiesta assenza: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/manager/login', methods=['POST'])
@@ -1259,6 +1320,15 @@ def manager_login():
                 'error': 'UserId e Password sono obbligatori'
             }), 400
 
+        # Rate limiting: dopo troppi fallimenti l'IP resta bloccato per la finestra
+        client_ip = request.remote_addr or 'unknown'
+        now = time.time()
+        attempts = [t for t in _login_failures.get(client_ip, []) if now - t < LOGIN_WINDOW_SECONDS]
+        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+            logger.warning(f"Rate limit login manager superato da {client_ip}")
+            return jsonify({'success': False, 'error': 'Troppi tentativi, riprovare più tardi'}), 429
+        _login_failures[client_ip] = attempts
+
         conn = db_connection.connect()
         if not conn:
             return jsonify({'success': False, 'error': 'Errore connessione database'}), 500
@@ -1267,6 +1337,8 @@ def manager_login():
         manager_info = request_manager.authenticate_manager(user_id, password)
 
         if not manager_info:
+            attempts.append(time.time())
+            _login_failures[client_ip] = attempts
             return jsonify({
                 'success': False,
                 'error': 'Credenziali non valide'
@@ -1278,8 +1350,11 @@ def manager_login():
                 'error': 'Manager senza CDC assegnato'
             }), 403
 
+        _login_failures.pop(client_ip, None)
+
         token = uuid.uuid4().hex
         manager_auth_tokens[token] = {
+            'last_seen': time.time(),
             'user_id': manager_info['user_id'],
             'manager_name': manager_info['manager_name'],
             'manager_email': manager_info.get('manager_email'),
@@ -1305,7 +1380,7 @@ def manager_login():
         logger.error(f"Errore manager login: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/manager/logout', methods=['POST'])
@@ -1362,7 +1437,7 @@ def manager_pending_requests():
         logger.error(f"Errore recupero pending requests manager: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/manager/decision', methods=['POST'])
@@ -1431,7 +1506,7 @@ def manager_decision():
         logger.error(f"Errore decisione manager: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 
@@ -1582,7 +1657,7 @@ def check_request_status():
         logger.error(f"Errore verifica stato richiesta: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/resend-absence-notification', methods=['POST'])
@@ -1728,7 +1803,7 @@ def resend_absence_notification():
         logger.error(f"Errore reinvio notifica: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/delete-pdf/<filename>', methods=['POST', 'DELETE'])
@@ -1758,7 +1833,7 @@ def delete_pdf_endpoint(filename):
 
     except Exception as e:
         logger.error(f"Errore eliminazione PDF {filename}: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 
@@ -1803,7 +1878,7 @@ def log_offline_event():
         
     except Exception as e:
         logger.error(f"Errore log offline event: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/offline-statistics', methods=['GET'])
@@ -1824,7 +1899,7 @@ def get_offline_statistics():
         
     except Exception as e:
         logger.error(f"Errore recupero statistiche offline: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 @app.route('/api/news/print', methods=['POST'])
@@ -2049,7 +2124,7 @@ def print_news():
         logger.error(f"Errore stampa news: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': str(e)}), 500
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
 if __name__ == '__main__':
@@ -2074,8 +2149,17 @@ if __name__ == '__main__':
         logger.warning(f"[SWEEP SPECIALI] Sweep all'avvio fallito (non bloccante): {sweep_error}")
     
     try:
-        # Avvia server
-        app.run(host='0.0.0.0', port=3000, debug=False, use_reloader=False, threaded=True)
+        # Server WSGI di produzione se disponibile, altrimenti server di sviluppo Flask
+        try:
+            from waitress import serve
+        except ImportError:
+            serve = None
+        if serve is not None:
+            logger.info("Avvio server HTTP produzione (waitress) su 0.0.0.0:3000")
+            serve(app, host='0.0.0.0', port=3000, threads=8)
+        else:
+            logger.warning("waitress non installata: uso il server di sviluppo Flask")
+            app.run(host='0.0.0.0', port=3000, debug=False, use_reloader=False, threaded=True)
     finally:
         # Arresta keep-alive alla chiusura
         logger.info("Arresto Printer Keep-Alive service...")
