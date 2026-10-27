@@ -1,19 +1,19 @@
 # ========================================
 # KIOSK HR - Creazione Pacchetto Deploy
-# Versione: 2.4.2
+# Versione: 2.4.3
 # Data: 2026-10-27
 # ========================================
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  KIOSK HR - Creazione Pacchetto" -ForegroundColor Cyan
-Write-Host "  Versione 2.4.2" -ForegroundColor Cyan
+Write-Host "  Versione 2.4.3" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Imposta nome pacchetto con timestamp
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$packageName = "Kiosk_HR_v2.4.2_$timestamp.zip"
+$packageName = "Kiosk_HR_v2.4.3_$timestamp.zip"
 
 Write-Host "[1/7] Preparazione directory temporanea..." -ForegroundColor Yellow
 if (Test-Path "deploy_temp") {

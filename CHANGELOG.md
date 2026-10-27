@@ -2,6 +2,25 @@
 
 Tutte le modifiche rilevanti al progetto saranno documentate in questo file.
 
+## [2.4.3] - 2026-10-27
+
+### Richieste assenza solo ai Manager
+
+- **Destinatari email** (`get_manager_emails`): la richiesta arriva solo ai
+  **Manager** (`FunctionCode >= 70`) dello stesso centro di costo, con codice
+  superiore al richiedente. Prima arrivava a chiunque avesse un FunctionCode
+  superiore (es. in PURCHASING a tutti i colleghi Technician/Office). Senza
+  Manager nel CDC si usa `FALLBACK_EMAIL`. Soglia nella costante
+  `MANAGER_FUNCTION_CODE` in `absence_request.py`.
+- **Pagina "Aprobare Cereri"**: login consentito solo con `FunctionCode >= 70`
+  (prima `> 61`, includeva ENGINEERING 65); il manager vede le richieste di
+  tutti i subordinati del CDC (`FunctionCode` inferiore al suo) invece dei soli
+  codici 40-69; stessa verifica prima di approvare/rifiutare.
+- **`index.html` (Adeverinte)**: corretta la nota del pannello istruzioni, che
+  riportava il testo delle richieste di assenza.
+
+---
+
 ## [2.4.2] - 2026-10-27
 
 ### 🔒 Sicurezza, pulizia repository e procedura di avvio automatico

@@ -1425,7 +1425,10 @@ def manager_pending_requests():
             return jsonify({'success': False, 'error': 'Errore connessione database'}), 500
 
         request_manager = AbsenceRequestManager(conn)
-        requests = request_manager.get_requests_for_manager(main_cdc_id=manager_session['main_cdc_id'])
+        requests = request_manager.get_requests_for_manager(
+            main_cdc_id=manager_session['main_cdc_id'],
+            manager_function_code=manager_session.get('function_code')
+        )
 
         return jsonify({
             'success': True,
@@ -1470,7 +1473,8 @@ def manager_decision():
 
         can_access = request_manager.manager_can_access_request(
             main_cdc_id=manager_session['main_cdc_id'],
-            absence_request_id=absence_request_id
+            absence_request_id=absence_request_id,
+            manager_function_code=manager_session.get('function_code')
         )
 
         if not can_access:

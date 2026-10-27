@@ -19,6 +19,11 @@ import pyodbc
 
 logger = logging.getLogger(__name__)
 
+# FunctionCode minimo del ruolo 'MANAGER' (employee.dbo.Functions).
+# Solo i Manager (>= 70) del centro di costo ricevono le richieste di assenza,
+# possono accedere alla pagina 'Aprobare Cereri' e approvarle/rifiutarle.
+MANAGER_FUNCTION_CODE = 70
+
 # ── ID dei tipi di richiesta gestiti dal kiosk ([Timeclocking].[dbo].[RequestType]) ──
 VACATION_REQUEST_TYPE_ID = 1    # Concediu odihna (ferie / congedo ordinario)
 URGENT_ABSENCE_TYPE_ID = 18     # Invoire urgenta (recuperabila) - max 10 giorni/anno
@@ -992,12 +997,14 @@ class AbsenceRequestManager:
     
     def get_manager_emails(self, employee_hire_history_id):
         """
-        Recupera le email dei superiori gerarchici del dipendente.
+        Recupera le email dei Manager del centro di costo del dipendente.
 
-        Criteri (stesso MainCdcId, FunctionCode superiore, rapporto attivo):
+        Criteri (stesso MainCdcId, solo Manager, rapporto attivo):
           - EmployeeHireHistory.EndWorkDate IS NULL AND employeerid = {EMPLOYER_ID}
           - EmployeeCdcStories.DateOut IS NULL
+          - Functions.FunctionCode >= MANAGER_FUNCTION_CODE (70 = MANAGER)
           - Functions.FunctionCode > FunctionCode del dipendente target
+            (la richiesta di un Manager va solo a ruoli superiori, non ai pari)
           - CostCenters.CdcId = MainCdcId del dipendente target
           - EmployeeAddress.WorkEmail non vuoto (e DateOut IS NULL)
         """
@@ -1036,6 +1043,7 @@ class AbsenceRequestManager:
             INNER JOIN employee.dbo.Employees e ON e.EmployeeId = h.EmployeeId
             INNER JOIN employee.dbo.EmployeeAddress a ON a.EmployeeId = e.EmployeeId AND a.DateOut IS NULL
             WHERE f.FunctionCode > @FunctionCode
+              AND f.FunctionCode >= {MANAGER_FUNCTION_CODE}
               AND c.CdcId = @MainCdcId
               AND LEN(ISNULL(a.WorkEmail, '')) > 0
             ORDER BY UPPER(e.EmployeeName + ' ' + e.EmployeeSurname);
@@ -1108,7 +1116,7 @@ class AbsenceRequestManager:
                     ON c.CdcId = csub.CdcId
                 INNER JOIN employee.dbo.Functions f
                     ON cs.FunctionId = f.FunctionId
-                    AND f.FunctionCode > 61
+                    AND f.FunctionCode >= {MANAGER_FUNCTION_CODE}
                 INNER JOIN employee.dbo.EmployeeHireHistory h
                     ON cs.EmployeeHireHistoryId = h.EmployeeHireHistoryId
                     AND h.EndWorkDate IS NULL
@@ -1160,13 +1168,20 @@ class AbsenceRequestManager:
             logger.error(traceback.format_exc())
             return None
 
-    def get_requests_for_manager(self, main_cdc_id):
-        """Recupera tutte le richieste assenza del CDC del manager, ordinate alfabeticamente."""
+    def get_requests_for_manager(self, main_cdc_id, manager_function_code=None):
+        """Recupera le richieste assenza dei subordinati del manager, ordinate alfabeticamente.
+
+        Subordinati = dipendenti dello stesso CDC con FunctionCode inferiore a quello
+        del manager (stessa regola usata per l'invio email in get_manager_emails).
+        """
+        if manager_function_code is None:
+            manager_function_code = MANAGER_FUNCTION_CODE
         try:
             cursor = self.conn.cursor()
 
             query = f"""
             DECLARE @MainCdcId INT = ?;
+            DECLARE @ManagerFunctionCode INT = ?;
 
             WITH AllowedEmployees AS (
                 SELECT DISTINCT
@@ -1189,7 +1204,7 @@ class AbsenceRequestManager:
                     ON c.CdcId = cs.CdcId
                 INNER JOIN employee.dbo.Functions f
                     ON f.FunctionId = ecs.FunctionId
-                WHERE f.FunctionCode BETWEEN 40 AND 69
+                WHERE f.FunctionCode < @ManagerFunctionCode
                   AND c.CdcId = @MainCdcId
             )
             SELECT
@@ -1228,7 +1243,7 @@ class AbsenceRequestManager:
             ORDER BY ae.Employee ASC, ar.DateStart ASC, ar.DateSys DESC;
             """
 
-            cursor.execute(query, (main_cdc_id,))
+            cursor.execute(query, (main_cdc_id, int(manager_function_code)))
             rows = cursor.fetchall()
 
             requests = []
@@ -1287,13 +1302,17 @@ class AbsenceRequestManager:
             logger.error(traceback.format_exc())
             return []
 
-    def manager_can_access_request(self, main_cdc_id, absence_request_id):
-        """Verifica che una specifica richiesta appartenga al CDC del manager corrente."""
+    def manager_can_access_request(self, main_cdc_id, absence_request_id, manager_function_code=None):
+        """Verifica che la richiesta sia di un subordinato del manager corrente
+        (stesso CDC e FunctionCode inferiore a quello del manager)."""
+        if manager_function_code is None:
+            manager_function_code = MANAGER_FUNCTION_CODE
         try:
             cursor = self.conn.cursor()
 
             query = f"""
             DECLARE @MainCdcId INT = ?;
+            DECLARE @ManagerFunctionCode INT = ?;
 
             SELECT TOP 1 ar.AbsenceRequestId
             FROM [Employee].[dbo].[AbsenceRequestes] ar
@@ -1308,11 +1327,14 @@ class AbsenceRequestManager:
                 ON cs.SubCdcId = ecs.SubCdcId
             INNER JOIN employee.dbo.CostCenters c
                 ON c.CdcId = cs.CdcId
+            INNER JOIN employee.dbo.Functions f
+                ON f.FunctionId = ecs.FunctionId
             WHERE ar.AbsenceRequestId = ?
-              AND c.CdcId = @MainCdcId;
+              AND c.CdcId = @MainCdcId
+              AND f.FunctionCode < @ManagerFunctionCode;
             """
 
-            cursor.execute(query, (main_cdc_id, absence_request_id))
+            cursor.execute(query, (main_cdc_id, int(manager_function_code), absence_request_id))
             row = cursor.fetchone()
             return row is not None
 
