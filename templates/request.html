@@ -112,7 +112,7 @@
                 <div class="form-group" id="urgentFieldsGroup" style="display: none;">
                     <label for="urgentRecoveryPeriod" class="form-label">
                         <span class="label-text">Perioada de recuperare *</span>
-                        <span class="label-helper">Zilele de absență urgentă trebuie recuperate (max. 10 zile/an)</span>
+                        <span class="label-helper" id="urgentQuotaHelper">Zilele de absență urgentă trebuie recuperate</span>
                     </label>
                     <select id="urgentRecoveryPeriod" name="urgentRecoveryPeriod" class="form-select">
                         <option value="">Selectați...</option>
@@ -126,28 +126,17 @@
                     <div class="form-group">
                         <label for="specialReason" class="form-label">
                             <span class="label-text">Motiv special *</span>
-                            <span class="label-helper">Max. 5 zile/an pentru motive speciale</span>
+                            <span class="label-helper" id="specialMotiveHelper">Selectați situația pentru care solicitați permisul</span>
                         </label>
                         <select id="specialReason" name="specialReason" class="form-select">
                             <option value="">Selectați...</option>
-                            <option value="Deces (membru familie)">Deces (membru familie)</option>
-                            <option value="Căsătorie">Căsătorie</option>
-                            <option value="Naștere copil">Naștere copil</option>
-                            <option value="Alt motiv special">Alt motiv special</option>
+                            <!-- Populated by JavaScript da SpecialAbsenceMotives (nome evento + giorni) -->
                         </select>
-                    </div>
-                    <div class="form-group" id="specialReasonTextGroup" style="display: none;">
-                        <label for="specialReasonText" class="form-label">
-                            <span class="label-text">Detaliu motiv *</span>
-                            <span class="label-helper">Specificați motivul special</span>
-                        </label>
-                        <input type="text" id="specialReasonText" name="specialReasonText" class="form-input"
-                               maxlength="150" placeholder="Specificați motivul..." autocomplete="off">
                     </div>
                     <div class="result-warning" id="specialDocsWarning">
                         <p><strong>⚠️ DOCUMENTAȚIE OBLIGATORIE:</strong></p>
                         <p>Trebuie să prezentați documentele justificative la departamentul HR
-                           <strong>în termen de 5 zile</strong> de la data cererii.</p>
+                           <strong>în termen de <span id="specialDocsDays">5</span> zile</strong> de la data cererii.</p>
                         <p>În lipsa documentației, cererea va fi anulată și transformată automat
                            în zile de <strong>concediu odihnă</strong>.</p>
                     </div>
@@ -254,7 +243,7 @@
 
     <script src="/static/js/inactivity-timeout.js"></script>
     <script src="/static/js/time-fields.js"></script>
-    <script src="/static/js/request.js"></script>
+    <script src="/static/js/request.js?v=2.5.0"></script>
 </body>
 
 </html>

@@ -27,6 +27,7 @@ def create_deployment_package():
         'app.py',
         'config_manager.py',
         'db_connection.py',
+        'company_config.py',  # parametri aziendali (importato da app.py: senza, il kiosk non si avvia)
         'utils.py',
         
         # Generatori e report
@@ -100,6 +101,7 @@ def create_deployment_package():
         'static',
         'Images',
         'Fonts',
+        'sql',  # migrazioni DB idempotenti da applicare nelle nuove sedi
     ]
     
     # Crea il file ZIP

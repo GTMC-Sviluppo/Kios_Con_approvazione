@@ -30,7 +30,7 @@ with zipfile.ZipFile(latest_zip, 'r') as zipf:
         print("  " + f)
     
     # Verifica file critici
-    critical = ['app.py', 'config_manager.py', 'db_connection.py', 
+    critical = ['app.py', 'config_manager.py', 'db_connection.py', 'company_config.py',
                 'certificate_generator.py', 'absence_report.py', 
                 'absence_request.py', 'email_connector.py', 
                 'kiosk_request_logger.py', 'utils.py']

@@ -11,8 +11,10 @@ const state = {
     requestTypes: [],
     selectedRequestType: null,
     availableDays: 0,
-    quotaRemaining: null,   // quota residua per tipi con limite annuo (urgenti/speciali)
+    quotaRemaining: null,   // quota annua residua (solo assenze urgenti, limite per legge)
     quotaMax: null,
+    specialMotives: [],     // motivi speciali da SpecialAbsenceMotives (limite giorni PER EVENTO)
+    selectedMotive: null,
     dateStart: null,
     dateEnd: null,
     workingDays: 0,
@@ -74,10 +76,12 @@ const elements = {
     // Assenze urgenti / speciali
     urgentFieldsGroup: document.getElementById('urgentFieldsGroup'),
     urgentRecoveryPeriod: document.getElementById('urgentRecoveryPeriod'),
+    urgentQuotaHelper: document.getElementById('urgentQuotaHelper'),
     specialFieldsGroup: document.getElementById('specialFieldsGroup'),
     specialReason: document.getElementById('specialReason'),
-    specialReasonTextGroup: document.getElementById('specialReasonTextGroup'),
-    specialReasonText: document.getElementById('specialReasonText'),
+    specialMotiveHelper: document.getElementById('specialMotiveHelper'),
+    specialDocsDays: document.getElementById('specialDocsDays'),
+    specialDocsWarning: document.getElementById('specialDocsWarning'),
     quotaInfo: document.getElementById('quotaInfo'),
     quotaLabel: document.getElementById('quotaLabel'),
     quotaValue: document.getElementById('quotaValue')
@@ -88,6 +92,7 @@ const elements = {
 // ========================================
 document.addEventListener('DOMContentLoaded', function () {
     loadRequestTypes();
+    loadSpecialMotives();
     attachEventListeners();
     setMinDate();
     elements.badgeInput.focus();
@@ -119,6 +124,120 @@ function populateRequestTypes() {
         option.textContent = type.name;
         elements.requestType.appendChild(option);
     });
+}
+
+// ========================================
+// MOTIVI SPECIALI (anagrafica SpecialAbsenceMotives: nome evento + giorni)
+// ========================================
+async function loadSpecialMotives() {
+    try {
+        const response = await fetch('/api/special-motives');
+        const data = await response.json();
+
+        if (data.success) {
+            state.specialMotives = data.motives || [];
+            populateSpecialMotives();
+        } else {
+            console.warn('Impossibile caricare i motivi speciali');
+        }
+    } catch (error) {
+        console.error('Errore caricamento motivi speciali:', error);
+    }
+}
+
+function formatMotiveDays(motive) {
+    // Etichetta giorni dalla tabella (DaysLabelRo); fallback calcolato da MaxDays
+    if (motive.days_label_ro) {
+        return motive.days_label_ro;
+    }
+    if (motive.max_days === null || motive.max_days === undefined || motive.allow_custom_duration) {
+        return 'durat\u0103 conform documenta\u021Biei';
+    }
+    const days = Number.isInteger(motive.max_days) ? motive.max_days : motive.max_days.toFixed(1);
+    return motive.max_days === 1 ? `${days} zi lucr\u0103toare` : `${days} zile lucr\u0103toare`;
+}
+
+function populateSpecialMotives() {
+    if (!elements.specialReason) return;
+
+    elements.specialReason.innerHTML = '<option value="">Selecta\u021Bi...</option>';
+
+    state.specialMotives.forEach(motive => {
+        const option = document.createElement('option');
+        option.value = motive.id;
+        option.textContent = `${motive.name_ro} \u2013 ${formatMotiveDays(motive)}`;
+        elements.specialReason.appendChild(option);
+    });
+}
+
+function handleSpecialMotiveChange() {
+    const motiveId = parseInt(elements.specialReason.value, 10);
+    state.selectedMotive = state.specialMotives.find(m => m.id === motiveId) || null;
+    updateSpecialMotiveUI();
+
+    // Rivaluta il limite per evento se il periodo è già stato selezionato
+    if (state.workingDays > 0) {
+        evaluateSpecialMotiveDays();
+    }
+}
+
+function updateSpecialMotiveUI() {
+    const motive = state.selectedMotive;
+
+    if (elements.specialMotiveHelper) {
+        if (!state.specialMotives.length) {
+            // Catalogo non disponibile (es. migrazione DB non applicata in questa sede)
+            elements.specialMotiveHelper.textContent =
+                'Lista motivelor nu este disponibil\u0103: contacta\u021Bi departamentul HR';
+        } else if (!motive) {
+            elements.specialMotiveHelper.textContent = 'Selecta\u021Bi situa\u021Bia pentru care solicita\u021Bi permisul';
+        } else if (motive.max_days === null || motive.allow_custom_duration) {
+            elements.specialMotiveHelper.textContent =
+                'Durata se stabile\u0219te \u00een baza documenta\u021Biei justificative';
+        } else {
+            elements.specialMotiveHelper.textContent =
+                `Pentru acest eveniment: ${formatMotiveDays(motive)}`;
+        }
+    }
+
+    if (elements.specialDocsDays) {
+        elements.specialDocsDays.textContent = motive ? motive.docs_deadline_days : 5;
+    }
+    // Avviso documenti solo se il motivo li richiede (RequiresDocumentation)
+    if (elements.specialDocsWarning) {
+        elements.specialDocsWarning.style.display =
+            (motive && !motive.requires_documentation) ? 'none' : 'block';
+    }
+}
+
+/**
+ * Verifica il limite di giorni lavorativi PER EVENTO del motivo speciale.
+ * Ritorna true se la richiesta rispetta il limite (o il motivo ha durata libera).
+ */
+function evaluateSpecialMotiveDays() {
+    if (state.selectedRequestType !== config.specialRequestTypeId) return true;
+
+    const motive = state.selectedMotive;
+    const limited = motive && motive.max_days !== null && !motive.allow_custom_duration;
+
+    if (limited && state.workingDays > motive.max_days) {
+        elements.workingDaysHelper.textContent =
+            `\u26A0\uFE0F Motivul selectat prevede maxim ${formatMotiveDays(motive)}!`;
+        elements.workingDaysHelper.style.color = '#ef4444';
+        elements.submitBtn.disabled = true;
+        showToast(`Zile solicitate (${state.workingDays}) > maxim pentru motiv (${formatMotiveDays(motive)})`, 'error');
+        return false;
+    }
+
+    if (limited) {
+        elements.workingDaysHelper.textContent =
+            `\u2713 \u00cen limita motivului: ${formatMotiveDays(motive)}`;
+        elements.workingDaysHelper.style.color = '#10b981';
+    } else {
+        elements.workingDaysHelper.textContent = '';
+    }
+    elements.submitBtn.disabled = false;
+    return true;
 }
 
 function setMinDate(dayNoZone) {
@@ -168,17 +287,9 @@ function attachEventListeners() {
     // Request type change
     elements.requestType.addEventListener('change', handleRequestTypeChange);
 
-    // Motivo speciale: mostra il campo testo solo per "Alt motiv special"
+    // Motivo speciale: aggiorna limite giorni per evento e scadenza documenti
     if (elements.specialReason) {
-        elements.specialReason.addEventListener('change', function () {
-            if (elements.specialReasonTextGroup) {
-                elements.specialReasonTextGroup.style.display =
-                    (this.value === 'Alt motiv special') ? 'block' : 'none';
-                if (this.value !== 'Alt motiv special' && elements.specialReasonText) {
-                    elements.specialReasonText.value = '';
-                }
-            }
-        });
+        elements.specialReason.addEventListener('change', handleSpecialMotiveChange);
     }
 
     // Date changes
@@ -422,7 +533,7 @@ function handleRequestTypeChange(e) {
 
     // Assenze urgenti: mostra la scelta del periodo di recupero
     if (requestTypeId === config.urgentRequestTypeId) {
-        showUrgentFields();
+        showUrgentFields(selectedType);
     } else {
         hideUrgentFields();
     }
@@ -434,8 +545,8 @@ function handleRequestTypeChange(e) {
         hideSpecialFields();
     }
 
-    // Quota residua per i tipi con limite annuo (urgenti/speciali)
-    if (requestTypeId === config.urgentRequestTypeId || requestTypeId === config.specialRequestTypeId) {
+    // Quota annua residua: solo assenze urgenti (le speciali hanno limite per evento)
+    if (requestTypeId === config.urgentRequestTypeId) {
         loadQuota(requestTypeId, selectedType);
     } else {
         hideQuotaInfo();
@@ -455,9 +566,16 @@ function handleRequestTypeChange(e) {
 // ========================================
 // ASSENZE URGENTI / SPECIALI
 // ========================================
-function showUrgentFields() {
+function showUrgentFields(selectedType) {
     if (elements.urgentFieldsGroup) {
         elements.urgentFieldsGroup.style.display = 'block';
+    }
+    // Limite annuo per legge dalla tabella AbsenceRules.MaxDaysPerYear (niente valori fissi)
+    if (elements.urgentQuotaHelper) {
+        const maxDays = selectedType ? selectedType.max_days_per_year : null;
+        elements.urgentQuotaHelper.textContent = maxDays
+            ? `Zilele de absen\u021B\u0103 urgent\u0103 trebuie recuperate (max. ${maxDays} zile/an)`
+            : 'Zilele de absen\u021B\u0103 urgent\u0103 trebuie recuperate';
     }
 }
 
@@ -474,6 +592,7 @@ function showSpecialFields() {
     if (elements.specialFieldsGroup) {
         elements.specialFieldsGroup.style.display = 'block';
     }
+    updateSpecialMotiveUI();
 }
 
 function hideSpecialFields() {
@@ -483,12 +602,8 @@ function hideSpecialFields() {
     if (elements.specialReason) {
         elements.specialReason.value = '';
     }
-    if (elements.specialReasonText) {
-        elements.specialReasonText.value = '';
-    }
-    if (elements.specialReasonTextGroup) {
-        elements.specialReasonTextGroup.style.display = 'none';
-    }
+    state.selectedMotive = null;
+    updateSpecialMotiveUI();
 }
 
 function hideQuotaInfo() {
@@ -611,7 +726,7 @@ async function calculateWorkingDays() {
                     elements.submitBtn.disabled = false;
                 }
             } else if (state.quotaRemaining !== null && state.selectedRequestType !== null) {
-                // Tipi con quota annua (assenze urgenti / speciali)
+                // Tipi con quota annua (assenze urgenti)
                 if (state.workingDays > state.quotaRemaining) {
                     elements.workingDaysHelper.textContent =
                         `\u26A0\uFE0F Ave\u021Bi doar ${state.quotaRemaining} zile disponibile pentru acest tip!`;
@@ -624,6 +739,9 @@ async function calculateWorkingDays() {
                     elements.workingDaysHelper.style.color = '#10b981';
                     elements.submitBtn.disabled = false;
                 }
+            } else if (state.selectedRequestType === config.specialRequestTypeId) {
+                // Motivi speciali: limite di giorni lavorativi PER EVENTO (SpecialAbsenceMotives)
+                evaluateSpecialMotiveDays();
             } else {
                 elements.workingDaysHelper.textContent = '';
                 elements.submitBtn.disabled = false;
@@ -702,7 +820,7 @@ async function handleFormSubmit(e) {
         }
     }
 
-    // Verifica quota per assenze urgenti / speciali
+    // Verifica quota annua per assenze urgenti
     if (state.quotaRemaining !== null && state.selectedRequestType !== null) {
         if (state.workingDays > state.quotaRemaining) {
             showToast(`Zile solicitate (${state.workingDays}) > Zile disponibile (${state.quotaRemaining})`, 'error');
@@ -718,15 +836,13 @@ async function handleFormSubmit(e) {
         }
     }
 
-    // Assenza speciale: motivo obbligatorio (+ dettaglio per "Alt motiv special")
+    // Assenza speciale: motivo obbligatorio + limite di giorni per evento
     if (state.selectedRequestType === config.specialRequestTypeId) {
-        if (!elements.specialReason || !elements.specialReason.value) {
+        if (!elements.specialReason || !elements.specialReason.value || !state.selectedMotive) {
             showToast('Selecta\u021Bi motivul special (deces, c\u0103s\u0103torie etc.)!', 'warning');
             return;
         }
-        if (elements.specialReason.value === 'Alt motiv special' &&
-            (!elements.specialReasonText || !elements.specialReasonText.value.trim())) {
-            showToast('Specifica\u021Bi detaliu motivului special!', 'warning');
+        if (!evaluateSpecialMotiveDays()) {
             return;
         }
     }
@@ -755,9 +871,9 @@ async function submitRequest() {
                 urgentRecoveryPeriod: state.selectedRequestType === config.urgentRequestTypeId
                     ? (elements.urgentRecoveryPeriod?.value || null)
                     : null,
-                // Assenze speciali: motivo (+ dettaglio se "Alt motiv special")
-                specialReason: state.selectedRequestType === config.specialRequestTypeId
-                    ? buildSpecialReason()
+                // Assenze speciali: motivo dall'anagrafica (SpecialReasonId = MotiveId)
+                specialReasonId: state.selectedRequestType === config.specialRequestTypeId && state.selectedMotive
+                    ? state.selectedMotive.id
                     : null
             })
         });
@@ -786,18 +902,6 @@ async function submitRequest() {
         showToast('Errore di connessione', 'error');
         state.isProcessing = false;
     }
-}
-
-function buildSpecialReason() {
-    const reason = elements.specialReason?.value || '';
-    const detail = elements.specialReasonText?.value?.trim() || '';
-    if (reason === 'Alt motiv special' && detail) {
-        return `Alt motiv special: ${detail}`;
-    }
-    if (detail && reason !== 'Alt motiv special') {
-        return `${reason} - ${detail}`;
-    }
-    return reason || null;
 }
 
 function showResult(data) {

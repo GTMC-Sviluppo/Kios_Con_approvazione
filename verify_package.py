@@ -65,6 +65,7 @@ with zipfile.ZipFile(latest_zip, 'r') as zipf:
         'app.py',
         'config_manager.py',
         'db_connection.py',
+        'company_config.py',
         'certificate_generator.py',
         'absence_report.py',
         'absence_request.py',

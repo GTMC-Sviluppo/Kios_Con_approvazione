@@ -2,6 +2,41 @@
 
 Tutte le modifiche rilevanti al progetto saranno documentate in questo file.
 
+## [2.5.0] - 2026-11-06
+
+### Motivi speciali da tabella, con giorni per evento
+
+> **Prima di aggiornare i kiosk** eseguire sul database lo script idempotente
+> `sql/MIGRAZIONE_MOTIVI_SPECIALI.sql`: senza la tabella dei motivi l'elenco
+> resta vuoto e non si possono inviare richieste per motivi speciali.
+
+- **Nuova tabella `Employee.dbo.SpecialAbsenceMotives`**: nome dell'evento
+  (rumeno/italiano), giorni lavorativi massimi **per evento**, etichetta dei
+  giorni mostrata nel kiosk, obbligo e scadenza dei documenti, durata libera.
+  Nessun numero di giorni è più scritto nel codice. Motivi iniziali:
+  - Căsătorie salariat (matrimonio del dipendente) – 5 zile lucrătoare
+  - Căsătorie copil (matrimonio di un figlio/a) – 3 zile lucrătoare
+  - Deces soț/soție, copil, părinți, socri – 3 zile lucrătoare
+  - Deces bunic, frate, soră – 1 zi lucrătoare
+  - Donare sânge – 1 zi de permis (în ziua donării)
+  - Obligații civice – durată conform documentației (senza tetto)
+- **Kiosk (`/cerere`)**: l'elenco dei motivi arriva da `GET /api/special-motives`
+  e mostra nome e giorni di ogni evento; tolto "Alt motiv special" (testo libero).
+  Il limite per evento è controllato a video e all'invio
+  (`validate_special_motive`); il motivo scelto è salvato in
+  `AbsenceRequestes.SpecialReasonId` (il nome resta in `SpecialReason`).
+- **Tolto il tetto annuo di 5 giorni** per i motivi speciali
+  (`AbsenceRules.MaxDaysPerYear = NULL` per il tipo 19): il limite è per evento.
+- **Assenze urgenti (tipo 18)**: invariato il limite di **10 giorni
+  lavorativi/anno**; l'etichetta "max. X zile/an" ora viene dal database.
+- **Documenti**: scadenza presa dal motivo (`DocsDeadlineDays`); niente
+  scadenza né avviso per i motivi senza obbligo di documenti. Email, PDF,
+  motivazione di annullamento e notifica HR non riportano più "5 zile" fisso.
+- `request.js` caricato con `?v=2.5.0` per forzare l'aggiornamento della cache
+  nei browser dei kiosk.
+
+---
+
 ## [2.4.3] - 2026-10-27
 
 ### Richieste assenza solo ai Manager

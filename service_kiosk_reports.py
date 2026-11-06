@@ -545,7 +545,7 @@ class KioskReportsService:
         """
         Controllo giornaliero delle assenze speciali (motivi speciali: deces,
         casatorie etc.): quelle con documentazione non presentata entro la
-        scadenza (5 giorni dalla richiesta) vengono annullate e convertite in
+        scadenza (DocsDeadlineDays del motivo) vengono annullate e convertite in
         giorni di congedo ordinario. Notifica via email agli destinatari HR.
         """
         try:
@@ -580,7 +580,7 @@ class KioskReportsService:
                 <html><body style="font-family: Arial, sans-serif;">
                     <h2 style="color: #dc2626;">Conversie automat\u0103: absen\u021be speciale f\u0103r\u0103 documenta\u021bie</h2>
                     <p>Urm\u0103toarele cereri de absen\u021b\u0103 pentru motive speciale au fost anulate
-                    (documenta\u021bia nu a fost prezentat\u0103 \u00een termen de 5 zile de la cerere) \u0219i
+                    (documenta\u021bia nu a fost prezentat\u0103 \u00een termenul stabilit pentru motivul ales) \u0219i
                     transformate \u00een zile de concediu odihn\u0103:</p>
                     <table style="border-collapse: collapse;">
                         <tr>
@@ -619,7 +619,7 @@ class KioskReportsService:
         schedule.every().day.at("08:00").do(self.check_and_send_monthly_report)
 
         # Sweep giornaliero assenze speciali: conversione in congedo ordinario
-        # quando la documentazione non è stata presentata entro 5 giorni
+        # quando la documentazione non è stata presentata entro la scadenza del motivo
         schedule.every().day.at("06:30").do(self.check_and_convert_special_absences)
 
         # Per test: esegui subito (commentare in produzione)

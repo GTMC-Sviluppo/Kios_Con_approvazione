@@ -27,7 +27,7 @@ MANAGER_FUNCTION_CODE = 70
 # ── ID dei tipi di richiesta gestiti dal kiosk ([Timeclocking].[dbo].[RequestType]) ──
 VACATION_REQUEST_TYPE_ID = 1    # Concediu odihna (ferie / congedo ordinario)
 URGENT_ABSENCE_TYPE_ID = 18     # Invoire urgenta (recuperabila) - max 10 giorni/anno
-SPECIAL_ABSENCE_TYPE_ID = 19    # Motive speciale (deces, casatorie) - max 5 giorni/anno
+SPECIAL_ABSENCE_TYPE_ID = 19    # Motive speciale - limite giorni PER EVENTO da SpecialAbsenceMotives
 KIOSK_REQUEST_TYPE_IDS = (1, 7, 10, 12, URGENT_ABSENCE_TYPE_ID, SPECIAL_ABSENCE_TYPE_ID)
 
 # Scelta del dipendente per il recupero delle assenze urgenti (parametro in tabella)
@@ -303,6 +303,100 @@ class AbsenceRequestManager:
         except Exception as e:
             logger.error(f"Errore lettura DocsDeadlineDays (tipo {request_type_id}): {e}")
         return DEFAULT_DOCS_DEADLINE_DAYS
+
+    def get_special_motives(self):
+        """
+        Catalogo dei motivi speciali attivi (Employee.dbo.SpecialAbsenceMotives).
+
+        Ogni motivo porta il proprio limite di giorni lavorativi PER EVENTO
+        (MaxDays; NULL = durata in base alla documentazione, es. obblighi civici).
+        Sostituisce la lista hardcoded dell'interfaccia kiosk.
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT MotiveId, NameRo, NameIt, MaxDays, DaysLabelRo,
+                       RequiresDocumentation, DocsDeadlineDays, AllowCustomDuration
+                FROM [Employee].[dbo].[SpecialAbsenceMotives]
+                WHERE IsActive = 1 AND DateOut IS NULL
+                ORDER BY SortOrder, MotiveId
+            """)
+            motives = []
+            for row in cursor.fetchall():
+                motives.append({
+                    'id': int(row[0]),
+                    'name_ro': str(row[1]),
+                    'name_it': str(row[2]),
+                    'max_days': float(row[3]) if row[3] is not None else None,
+                    'days_label_ro': str(row[4]) if row[4] is not None else None,
+                    'requires_documentation': bool(row[5]),
+                    'docs_deadline_days': int(row[6]) if row[6] is not None else DEFAULT_DOCS_DEADLINE_DAYS,
+                    'allow_custom_duration': bool(row[7])
+                })
+            return motives
+
+        except Exception as e:
+            logger.error(f"Errore recupero motivi speciali: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
+
+    def get_special_motive(self, motive_id):
+        """Singolo motivo speciale attivo per MotiveId (None se inesistente o disattivo)."""
+        if motive_id is None:
+            return None
+        for motive in self.get_special_motives():
+            if motive['id'] == motive_id:
+                return motive
+        return None
+
+    def validate_special_motive(self, motive_id, date_start, date_end, holidays):
+        """
+        Valida il motivo speciale scelto rispetto ai giorni lavorativi richiesti.
+
+        Il limite (SpecialAbsenceMotives.MaxDays) è PER EVENTO: i giorni
+        lavorativi della richiesta non possono superarlo, salvo i motivi con
+        durata libera (AllowCustomDuration / MaxDays NULL, es. obblighi civici).
+
+        Returns:
+            dict: {'valid', 'message', 'motive', 'requested_days'}
+        """
+        motive = self.get_special_motive(motive_id)
+        if not motive:
+            return {
+                'valid': False,
+                'message': 'Selecta\u021bi un motiv special valid din list\u0103.',
+                'motive': None,
+                'requested_days': None
+            }
+
+        requested_days = self.calculate_working_days(date_start, date_end, holidays)
+        max_days = motive['max_days']
+
+        if max_days is not None and requested_days > max_days:
+            max_label = int(max_days) if float(max_days).is_integer() else max_days
+            message = (
+                f"ATEN\u021aIE: Motivul special selectat prevede maxim {max_label} "
+                f"zile lucr\u0103toare.\n\n"
+                f"A\u021bi solicitat {requested_days} zile lucr\u0103toare."
+            )
+            logger.warning(
+                f"Motivo speciale {motive_id}: richiesti {requested_days} gg > "
+                f"limite {max_days} gg/evento"
+            )
+            return {
+                'valid': False,
+                'message': message,
+                'motive': motive,
+                'requested_days': requested_days
+            }
+
+        return {
+            'valid': True,
+            'message': '',
+            'motive': motive,
+            'requested_days': requested_days
+        }
 
     def compute_urgent_recovery_deadline(self, recovery_period, date_start):
         """
@@ -718,7 +812,8 @@ class AbsenceRequestManager:
     def save_absence_request(self, registro_id, hire_history_id, request_type_id,
                             date_start, date_end, from_time=None, to_time=None,
                             username="Unknown", request_type_name="Richiesta Assenza",
-                            urgent_recovery_period=None, special_reason=None):
+                            urgent_recovery_period=None, special_reason=None,
+                            special_reason_id=None):
         """Salva richiesta assenza nel database.
 
         Per le assenze urgenti (IDRequestType 18) `urgent_recovery_period` è la
@@ -726,9 +821,11 @@ class AbsenceRequestManager:
         'YEAR' = recupero entro l'anno lavorativo), salvata come parametro in
         AbsenceRequestes.UrgentRecoveryPeriod insieme alla scadenza calcolata.
 
-        Per le assenze speciali (IDRequestType 19) `special_reason` è il motivo
-        (decesso, matrimonio, ...); la scadenza per la presentazione della
-        documentazione al dep. HR viene calcolata da AbsenceRules.DocsDeadlineDays.
+        Per le assenze speciali (IDRequestType 19) `special_reason_id` è il
+        MotiveId dall'anagrafica SpecialAbsenceMotives (limite giorni per
+        evento) e `special_reason` il nome testuale del motivo; la scadenza
+        per la presentazione della documentazione al dep. HR viene presa da
+        SpecialAbsenceMotives.DocsDeadlineDays (fallback AbsenceRules).
         """
         try:
             cursor = self.conn.cursor()
@@ -746,12 +843,19 @@ class AbsenceRequestManager:
                     urgent_recovery_period, date_start
                 )
             elif request_type_id == SPECIAL_ABSENCE_TYPE_ID:
-                docs_days = self.get_docs_deadline_days(request_type_id)
+                motive = self.get_special_motive(special_reason_id)
+                if motive is not None:
+                    # Motivo senza obbligo di documenti: nessuna scadenza (niente conversione)
+                    docs_days = motive['docs_deadline_days'] if motive['requires_documentation'] else None
+                else:
+                    # Fallback: richieste legacy senza motivo anagrafico
+                    docs_days = self.get_docs_deadline_days(request_type_id)
                 if isinstance(date_start, datetime):
                     ds = date_start.date()
                 else:
                     ds = date_start
-                documentation_deadline = ds + timedelta(days=docs_days)
+                if docs_days is not None:
+                    documentation_deadline = ds + timedelta(days=docs_days)
                 if special_reason:
                     special_reason = str(special_reason).strip()[:200]
 
@@ -777,6 +881,15 @@ class AbsenceRequestManager:
 
             row = cursor.fetchone()
             absence_request_id = int(row[0]) if row and row[0] else None
+
+            # Riferimento al motivo anagrafico: solo per le assenze speciali, nella
+            # stessa transazione (le altre richieste non dipendono dalla colonna)
+            if absence_request_id and special_reason_id is not None:
+                cursor.execute("""
+                    UPDATE [Employee].[dbo].[AbsenceRequestes]
+                    SET [SpecialReasonId] = ?
+                    WHERE [AbsenceRequestId] = ?
+                """, (special_reason_id, absence_request_id))
 
             self.conn.commit()
 
@@ -950,7 +1063,7 @@ class AbsenceRequestManager:
                     # 3. Annulla la richiesta speciale e collega la conversione
                     refuse_motive = (
                         f"Anulat\u0103: documenta\u021bia justificativ\u0103 nu a fost prezentat\u0103 "
-                        f"\u00een termen de 5 zile (p\u00e2n\u0103 la {docs_deadline.strftime('%d.%m.%Y') if docs_deadline else 'N/A'}). "
+                        f"\u00een termenul stabilit (p\u00e2n\u0103 la {docs_deadline.strftime('%d.%m.%Y') if docs_deadline else 'N/A'}). "
                         f"Transformat\u0103 automat \u00een zile de concediu odihn\u0103 (cererea nr. intern {new_request_id})."
                     )
                     cursor.execute("""
@@ -1555,9 +1668,11 @@ class AbsenceRequestManager:
                 c.setFont(self.font_name, 10)
                 dl = request_data['documentation_deadline']
                 dl_str = dl.strftime('%d.%m.%Y') if hasattr(dl, 'strftime') else str(dl)
+                docs_days = request_data.get('docs_deadline_days')
                 docs_lines = [
                     f"Prezentați documentele justificative la departamentul HR până la {dl_str}",
-                    "(în termen de 5 zile de la data cererii).",
+                    f"(în termen de {docs_days} zile de la data cererii)." if docs_days
+                    else "(în termenul stabilit pentru motivul selectat).",
                     "În lipsa documentației, cererea va fi anulată și transformată",
                     "automat în zile de concediu odihnă."
                 ]

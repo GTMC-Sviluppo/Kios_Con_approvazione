@@ -739,6 +739,27 @@ def get_request_types():
         return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
 
 
+@app.route('/api/special-motives', methods=['GET'])
+def get_special_motives():
+    """Motivi speciali attivi (SpecialAbsenceMotives) con il limite giorni per evento."""
+    try:
+        conn = db_connection.connect()
+        if not conn:
+            return jsonify({'success': False, 'error': 'Errore connessione database'}), 500
+
+        request_manager = AbsenceRequestManager(conn)
+        motives = request_manager.get_special_motives()
+
+        return jsonify({
+            'success': True,
+            'motives': motives
+        })
+
+    except Exception as e:
+        logger.error(f"Errore recupero motivi speciali: {str(e)}")
+        return jsonify({'success': False, 'error': 'Errore interno del server'}), 500
+
+
 @app.route('/api/available-vacation-days', methods=['POST'])
 def get_available_vacation_days():
     """Calcola giorni ferie disponibili"""
@@ -899,7 +920,7 @@ def special_docs_sweep():
                 <html><body style="font-family: Arial, sans-serif;">
                     <h2 style="color: #dc2626;">Conversie automată: absențe speciale fără documentație</h2>
                     <p>Următoarele cerere de absență pentru motive speciale au fost anulate
-                    (documentația nu a fost prezentată în termen de 5 zile) și transformate
+                    (documentația nu a fost prezentată în termenul stabilit) și transformate
                     în zile de concediu odihnă:</p>
                     <table style="border-collapse: collapse;">
                         <tr>
@@ -960,7 +981,9 @@ def submit_absence_request():
         to_time = data.get('toTime')
         # Assenze urgenti: scelta del dipendente per il recupero ('MONTH' | 'YEAR')
         urgent_recovery_period = (data.get('urgentRecoveryPeriod') or '').strip().upper() or None
-        # Assenze speciali: motivo (decesso, matrimonio, ...)
+        # Assenze speciali: motivo dall'anagrafica SpecialAbsenceMotives
+        # (SpecialReasonId = MotiveId; specialReason resta per compatibilità legacy)
+        special_reason_id = data.get('specialReasonId')
         special_reason = (data.get('specialReason') or '').strip() or None
         
         # Validazioni
@@ -1056,9 +1079,10 @@ def submit_absence_request():
         # ── Verifiche specifiche assenze urgenti / speciali ──────────────────
         urgent_recovery_deadline = None
         documentation_deadline = None
+        special_motive = None
 
-        if request_type_id in (URGENT_ABSENCE_TYPE_ID, SPECIAL_ABSENCE_TYPE_ID):
-            # Quota annua per legge: 10 giorni urgenti / 5 giorni speciali (parametro in AbsenceRules)
+        if request_type_id == URGENT_ABSENCE_TYPE_ID:
+            # Quota annua per legge: 10 giorni urgenti (parametro in AbsenceRules)
             logger.info(f"Verifica quota annua per tipo {request_type_id}...")
             quota_result = request_manager.check_quota_availability(
                 hire_history_id, request_type_id, date_start, date_end, holidays, year
@@ -1084,14 +1108,36 @@ def submit_absence_request():
             )
 
         if request_type_id == SPECIAL_ABSENCE_TYPE_ID:
-            if not special_reason:
+            # Motivo speciale dall'anagrafica: limite giorni lavorativi PER EVENTO
+            if special_reason_id in (None, ''):
                 return jsonify({
                     'success': False,
                     'error': 'Selecta\u021bi motivul special (deces, c\u0103s\u0103torie etc.).'
                 }), 400
-            documentation_deadline = date_start + timedelta(
-                days=request_manager.get_docs_deadline_days(request_type_id)
+            try:
+                special_reason_id = int(special_reason_id)
+            except (TypeError, ValueError):
+                return jsonify({
+                    'success': False,
+                    'error': 'Motiv special invalid.'
+                }), 400
+            motive_validation = request_manager.validate_special_motive(
+                special_reason_id, date_start, date_end, holidays
             )
+            if not motive_validation['valid']:
+                logger.warning(f"Validazione motivo speciale fallita: {motive_validation['message']}")
+                return jsonify({
+                    'success': False,
+                    'error': motive_validation['message']
+                }), 400
+            special_motive = motive_validation['motive']
+            # Nome motivo testuale (per SpecialReason: approvazioni, PDF, email, monitor)
+            special_reason = special_motive['name_ro']
+            # Scadenza documenti solo per i motivi che li richiedono (RequiresDocumentation)
+            if special_motive['requires_documentation']:
+                documentation_deadline = date_start + timedelta(
+                    days=special_motive['docs_deadline_days']
+                )
 
         # Crea entry nel registro
         logger.info("Creazione entry registro...")
@@ -1120,7 +1166,8 @@ def submit_absence_request():
             username=employee_name,
             request_type_name=request_type_name,
             urgent_recovery_period=urgent_recovery_period if request_type_id == URGENT_ABSENCE_TYPE_ID else None,
-            special_reason=special_reason if request_type_id == SPECIAL_ABSENCE_TYPE_ID else None
+            special_reason=special_reason if request_type_id == SPECIAL_ABSENCE_TYPE_ID else None,
+            special_reason_id=special_reason_id if request_type_id == SPECIAL_ABSENCE_TYPE_ID else None
         )
         
         if not absence_request_id:
@@ -1150,7 +1197,8 @@ def submit_absence_request():
             'urgent_recovery_period': urgent_recovery_period if request_type_id == URGENT_ABSENCE_TYPE_ID else None,
             'urgent_recovery_deadline': urgent_recovery_deadline,
             'special_reason': special_reason if request_type_id == SPECIAL_ABSENCE_TYPE_ID else None,
-            'documentation_deadline': documentation_deadline
+            'documentation_deadline': documentation_deadline,
+            'docs_deadline_days': special_motive['docs_deadline_days'] if special_motive else None
         }
         
         pdf_path = request_manager.generate_confirmation_pdf(employee_data_pdf, request_data_pdf, registry_info)
@@ -1199,14 +1247,18 @@ def submit_absence_request():
                 '''
             elif request_type_id == SPECIAL_ABSENCE_TYPE_ID:
                 docs_dl = documentation_deadline.strftime('%d.%m.%Y') if documentation_deadline else '-'
+                docs_days_label = special_motive['docs_deadline_days'] if special_motive else 5
                 type_specific_rows += f'''
                     <tr>
                         <td style="padding: 8px; font-weight: bold;">Motiv special:</td>
                         <td style="padding: 8px; color: #667eea; font-weight: bold;">{special_reason or '-'}</td>
                     </tr>
+                '''
+                if documentation_deadline:
+                    type_specific_rows += f'''
                     <tr>
                         <td style="padding: 8px; font-weight: bold;">Documentație:</td>
-                        <td style="padding: 8px; color: #dc2626; font-weight: bold;">⚠️ Obligatorie la HR până la {docs_dl} (5 zile), altfel cererea se anulează și devine concediu odihnă</td>
+                        <td style="padding: 8px; color: #dc2626; font-weight: bold;">⚠️ Obligatorie la HR până la {docs_dl} ({docs_days_label} zile), altfel cererea se anulează și devine concediu odihnă</td>
                     </tr>
                 '''
 
